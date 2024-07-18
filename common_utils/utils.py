@@ -11,8 +11,13 @@ import jaxparrow as jpw
 
 import scipy
 
+
+
+
+
 # --- Global variables
 
+# spatial boxes : [min_longitude, max_longitude, min_latitude, max_latitude]
 BBOX_MED = [-5.8, 36.5, 30, 44.5]
 BBOX_DRIFTERS = [0, 13.5, 36.5, 44]
 BBOX_SWATH = [0, 9, 36.5, 44]
@@ -20,7 +25,10 @@ BBOX_SWATH = [0, 9, 36.5, 44]
 TIME_SPAN_L3SWOT = (np.datetime64('2023-03-30'), np.datetime64('2023-07-09'))
 
 
-# SVP drifters
+######################
+# Drifters functions
+
+# SVP drifters files (LOWESS 30min)
 FILES_SVP = ['L2_svp_scripps_10min_lowess_30min_v0.nc',
     'L2_svp_ogs_1h_lowess_30min_v0.nc',
     'L2_svp_ogs_10min_lowess_30min_v0.nc',
@@ -28,8 +36,7 @@ FILES_SVP = ['L2_svp_scripps_10min_lowess_30min_v0.nc',
     'L2_svp_scripps_1h_lowess_30min_v0.nc',
     'L2_svp_bcg_10min_lowess_30min_v0.nc']
 
-
-# unused variables of drifters dataset (only lat, lon, u, v are used)
+# unused variables of SVP drifters dataset, keep only  (lat, lon, u, v)
 DROP_VARS_DRIFTERS = [
  'x',
  'y',
@@ -53,9 +60,6 @@ DROP_VARS_DRIFTERS = [
  'end_lon',
  'end_lat',
  'end_reason']
-
-
-
 
 # --- open SVP drifter file and L3_cleaning : takes only data compatible with SWOT 1day swath time & loc 
 def open_one_traj(dir, file, idx_id, L3_cleaning: bool, padd_swath=0.5):
@@ -100,27 +104,12 @@ def open_one_traj(dir, file, idx_id, L3_cleaning: bool, padd_swath=0.5):
 
 
 
-# --- FIELDS functions
 
-def _add_one_Tgrid_velocity(ds, u, axis, padding, replace=True):
-    u_t = jpw.tools.operators.interpolation(jnp.copy(ds[u].values), axis=axis, padding=padding)
-    if replace:
-        ds[u] = ds[u].copy(data=u_t)
-    else:
-        ds[str(u)+'_t'] = ds[u].copy(data=u_t)
-    return ds
-
-def add_Tgrid_velocities(ds, replace=False):
-
-    ds = _add_one_Tgrid_velocity(ds, 'u_geos', axis=1, padding='left', replace=replace)
-    ds = _add_one_Tgrid_velocity(ds, 'v_geos', axis=0, padding='left', replace=replace)
-
-    ds = _add_one_Tgrid_velocity(ds, 'u_var', axis=1, padding='left', replace=replace)
-    ds = _add_one_Tgrid_velocity(ds, 'v_var', axis=0, padding='left', replace=replace)
-
-    return ds
+######################
+# FIELDS functions
 
 
+#localization functions
 
 def restrain_domain(ds, min_lon, max_lon, min_lat, max_lat):
     '''
@@ -132,13 +121,6 @@ def restrain_domain(ds, min_lon, max_lon, min_lat, max_lat):
     
     mask = extend & ~(in_biscay | in_blacksea) # exclude biscay and black sea
     return ds.where(mask, drop=True)
-
-
-
-
-
-
-# --- localization
 
 def isin_swath(lon, lat):
     ''' 
@@ -165,7 +147,30 @@ def isnear_swath(lon, lat, dlon=0.25):
     return np.logical_and(x1-dlon <= lon_down, lon_down <= x4+dlon)
 
 
-# --- interpolation of unregular grid
+#processing functions:
+
+def add_Tgrid_velocities(ds, replace=False):
+    '''
+    compute T-grid velocities from a U/V grid velocities
+    '''
+
+    def _add_one_Tgrid_velocity(ds, u, axis, padding, replace=True):
+        
+        u_t = jpw.tools.operators.interpolation(jnp.copy(ds[u].values), axis=axis, padding=padding)
+        if replace:
+            ds[u] = ds[u].copy(data=u_t)
+        else:
+            ds[str(u)+'_t'] = ds[u].copy(data=u_t)
+        return ds
+
+    ds = _add_one_Tgrid_velocity(ds, 'u_geos', axis=1, padding='left', replace=replace)
+    ds = _add_one_Tgrid_velocity(ds, 'v_geos', axis=0, padding='left', replace=replace)
+
+    ds = _add_one_Tgrid_velocity(ds, 'u_var', axis=1, padding='left', replace=replace)
+    ds = _add_one_Tgrid_velocity(ds, 'v_var', axis=0, padding='left', replace=replace)
+
+    return ds
+
 
 def interp_linear_velocity_field_L3(field, u: str, v: str, time_vec, lat_vec, lon_vec, dlat=0.022, dlon=0.03):
     """
@@ -223,7 +228,6 @@ def interp_linear_velocity_field_L3(field, u: str, v: str, time_vec, lat_vec, lo
     return u_interp, v_interp
 
 
-
 def interp_closest_velocity_field_L3(ds, u: str, v: str, time_vec, lat_vec, lon_vec):
     '''
     Same as interp_linear_velocity_field_L3 function but with the closest point interpolation
@@ -254,10 +258,13 @@ def interp_closest_velocity_field_L3(ds, u: str, v: str, time_vec, lat_vec, lon_
 
 
 
-# --- utils numpy & datetime...
+
+
+###############################
+# utils numpy & datetime...
 
 def normalize_angle(angles):
-    # Normalize the angles to be within -360 to 360 degrees
+    # Normalize the angles to be within -180 to 180 degrees
     angles = np.mod(angles, 360)
     
     # Adjust angles to be within -180 to 180 degrees
@@ -301,38 +308,3 @@ def get_mean_datetime(datetime_array):
     else:
         print("No valid datetime values found.")
         return None
-    
-
-
-
-
-
-
-# --- drifters file selection functions
-
-def file_selection_mediterranean(files):
-    # only mediterranean (not containing 'uwa') 
-
-    selected_files = []
-    for file in files:
-         if not file.count("uwa"):
-            selected_files.append(file)
-    return selected_files
-
-def file_selection_by_method(files, method: str):
-    # files from one interpolation method: 'variationnal' or 'lowess'
-
-    selected_files = []
-    for file in files:
-         if file.count(method):
-            selected_files.append(file)
-    return selected_files
-
-def file_selection_by_sampling(files, sampling: str):
-    # files from one smooth L2 sampling: '10min', '30min', '1h' at the end of the file_name
-
-    selected_files = []
-    for file in files:
-         if file[-11:].count(sampling):
-            selected_files.append(file)
-    return selected_files

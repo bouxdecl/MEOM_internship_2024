@@ -1,5 +1,4 @@
 
-
 # --- Imports
 
 import scipy
@@ -11,48 +10,42 @@ import xarray as xr
 import clouddrift as cd
 
 
+'''
+
+Drifters processing functions
+#############################
+
+
+Filtering (positions and/or velocities):
+    one_trajectory_filtering()
+    one_trajectory_filtering_and_field_comparison()
+
+Cut one trajectory into scenes:
+    get_scenes_from_traj()
+
+    
+Compute scene metrics for one scene or for a dataset or scenes:
+    add_metrics()     
+    all_add_metrics() 
+
+Filters:
+    low_pass_complex
+    gaussian_filter
+
+'''
+
+
+
+
 
 
 # --- drifter filtering and field comparison
 
-def one_trajectory_filtering_and_field_comparison(traj: xr.Dataset,
-                                                  field: xr.Dataset,
-                                                  interp_func, 
-                                                  filtering=False, low_pass_cutoff= 1/(48*3600),
-                                                  filter_positions = 'gaussian', gaussian_std=12*3600
-                                                  ):
-    '''
-    Filters and interpolates trajectory data.
 
-    Parameters:
-
-    traj_raw : xr.Dataset
-        Raw trajectory data with variables: time, lat, lon, u, v.
-
-    field: xr.Dataset
-        Field dataset with 
-        dims= time, y, x
-        coords= time, latitude, longitude
-        data_vars= ssh
-
-    DATAPRODUCT: str,
-        Description of the dataset,
-    interp_func : function
-        Interpolation function to obtain field velocities.
-    filtering : bool, optional
-        Whether to apply filtering to positions and velocities (default is Fasle).
-    low_pass_cutoff : float, optional
-        Cutoff frequency for low-pass filtering in Hz (default is 1/(48*3600)).
-
-    filter_positions : str, optional
-        Method for filtering positions ('low_pass' or 'gaussian', default is 'gaussian').
-    gaussian_width : float, optional
-        Width for Gaussian filter in seconds (default is 12*3600).
-
-    Returns:
-    xr.Dataset
-        Trajectory dataset with filtered positions, velocities, and interpolated field velocities.
-    '''
+def one_trajectory_filtering(traj: xr.Dataset,                                                
+                             filtering_velocities=True, low_pass_cutoff= 1/(48*3600),
+                             filtering_positions = False, filter_positions='gaussian', gaussian_std=12*3600
+                             ):
 
     _traj = traj.copy(deep=True)
 
@@ -60,22 +53,20 @@ def one_trajectory_filtering_and_field_comparison(traj: xr.Dataset,
     dt = float(_traj.time[1] - _traj.time[0])*1e-9
 
 
-    if not filtering:
-        lat_filtered = lat
-        lon_filtered = lon
-        u_filtered   = u
-        v_filtered   = v
-
-    if filtering:
     # --- Velocities filtering
+    if filtering_velocities:
         U = u + 1j* v
         U_filtered = low_pass_complex(U, dt=dt, cutoff = low_pass_cutoff)
         
         u_filtered = U_filtered.real
         v_filtered = U_filtered.imag             
-        
+    else:
+        u_filtered   = u
+        v_filtered   = v
+
 
     # --- Position filtering
+    if filtering_positions:
         if filter_positions == 'low_pass':
             X = lon + 1j* lat
             X_filtered = low_pass_complex(X, dt=dt, cutoff = low_pass_cutoff)
@@ -86,12 +77,9 @@ def one_trajectory_filtering_and_field_comparison(traj: xr.Dataset,
         elif filter_positions == 'gaussian':
             lon_filtered = gaussian_filter(lon, dt=dt, gaussian_std=gaussian_std)
             lat_filtered = gaussian_filter(lat, dt=dt, gaussian_std=gaussian_std)
-        
-
-    # --- get field interpolated velocities
-    u_geo_swot, v_geo_swot = interp_func(field, 'u_geos', 'v_geos', time, lat_filtered, lon_filtered)
-    u_var_swot, v_var_swot = interp_func(field, 'u_var',  'v_var',  time, lat_filtered, lon_filtered)
-
+    else:
+        lat_filtered = lat
+        lon_filtered = lon
 
     # --- Save filtered and interpolated data into the dataset
     _traj["lat_filtered"] = (["time"], lat_filtered)
@@ -99,23 +87,48 @@ def one_trajectory_filtering_and_field_comparison(traj: xr.Dataset,
     
     _traj["u_filtered"]   = (["time"], u_filtered)
     _traj["v_filtered"]   = (["time"], v_filtered)
-    
-    _traj["u_geo_swot"]   = (["time"], u_geo_swot)
-    _traj["v_geo_swot"]   = (["time"], v_geo_swot)
-    
-    _traj["u_var_swot"]   = (["time"], u_var_swot)
-    _traj["v_var_swot"]   = (["time"], v_var_swot)
-    
-    _traj.attrs = traj.attrs
-    _traj.attrs['filtering'] = '{}, low_pass_cutoff={}Hz, filter_positions={}, gaussian_std={}s'.format(filtering, str(low_pass_cutoff), filter_positions, gaussian_std) 
 
+    _traj.attrs = traj.attrs
+    _traj.attrs['filtering'] = 'filtering_velocities={}, low_pass_cutoff={}Hz, filtering_positions={}, gaussian_std={}s'.format(filtering_velocities,  str(low_pass_cutoff), filtering_positions, gaussian_std) 
+
+    return _traj
+
+
+
+def one_trajectory_filtering_and_field_comparison(traj: xr.Dataset,
+                                                  field: xr.Dataset,
+                                                  interp_func, 
+                                                  filtering_velocities=True, low_pass_cutoff= 1/(48*3600),
+                                                  filtering_positions=False, filter_positions = 'gaussian', gaussian_std=12*3600
+                                                  ):
+
+    _traj = one_trajectory_filtering(traj=traj,                                                
+                                    filtering_velocities=filtering_velocities, low_pass_cutoff= low_pass_cutoff,
+                                    filtering_positions = filtering_positions, filter_positions=filter_positions, gaussian_std=gaussian_std
+                                    )
+
+    time, lat_filtered, lon_filtered = _traj.time.values, _traj.lat_filtered.values, _traj.lon_filtered.values
+
+    # --- get field interpolated velocities at the drifters positions/time
+    u_geo_swot, v_geo_swot = interp_func(field, 'u_geos', 'v_geos', time, lat_filtered, lon_filtered)
+    u_var_swot, v_var_swot = interp_func(field, 'u_var',  'v_var',  time, lat_filtered, lon_filtered)
+
+    # --- Save filtered and interpolated data into the dataset
+    _traj["u_geo"]   = (["time"], u_geo_swot)
+    _traj["v_geo"]   = (["time"], v_geo_swot)
+    
+    _traj["u_var"]   = (["time"], u_var_swot)
+    _traj["v_var"]   = (["time"], v_var_swot)
+    
     return _traj
 
 
 
 
 
-# --- Cut into chunks and add metrics 
+
+
+# --- Cut into 3-day scenes 
 
 def get_scenes_from_traj(traj, n_days=3, dt=np.timedelta64(30*60, "s") ):
     if not dt:
@@ -140,40 +153,77 @@ def get_scenes_from_traj(traj, n_days=3, dt=np.timedelta64(30*60, "s") ):
     return scenes
 
 
-def compute_scene_metric(u_drifter, v_drifter, u_field, v_field):
-    U_drifter = u_drifter + 1j* v_drifter
-    U_field   = u_field + 1j* v_field 
-
-    n_points = np.nansum(~np.isnan(u_field))
-    return np.nansum( np.abs(U_drifter - U_field) / np.abs(U_field) ) / n_points, n_points
 
 
-def add_metrics(scenes):
+# --- Add field/drifters comparison metrics
 
-    ds = scenes.copy(deep=True)
+def add_metrics(one_scene):
 
-    metric_geo = np.empty(ds.sizes['scene'])
-    n_points_geo = np.empty(ds.sizes['scene']) 
+    ds = one_scene.copy(deep=True)
+    ds['n_points_compa'] = np.nansum(~np.isnan(ds.u_geo_swot))
 
-    metric_var = np.empty(ds.sizes['scene'])
-    n_points_var = np.empty(ds.sizes['scene'])
+    U_drifter = ds.u_filtered + 1j* ds.v_filtered
 
-    for i in range(ds.sizes['scene']):
-        traj = ds.isel(scene=i)
-        metric_geo[i], n_points_geo[i] = compute_scene_metric(traj.u, traj.v, traj.u_geo_swot, traj.v_geo_swot)
-        metric_var[i], n_points_var[i] = compute_scene_metric(traj.u, traj.v, traj.u_var_swot, traj.v_var_swot)
 
-    ds['metric_geo'] = (["scene"], metric_geo, {'metric': 'mean( L2(Udrift - Ufield) / L2(Udrift)'})
-    ds['n_points_metric_geo'] = (["scene"], n_points_geo)  
+    for U_field, name in zip([ds.u_geo_swot+1j*ds.v_geo_swot , ds.u_var_swot+1j*ds.v_var_swot], ['geo', 'var']):
 
-    ds['metric_var'] = (["scene"], metric_var, {'metric': 'mean( L2(Udrift - Ufield) / L2(Udrift)'})
-    ds['n_points_metric_var'] = (["scene"], n_points_var)
+        metric = np.abs(U_drifter - U_field)
+        metric_norma = metric / np.abs(U_drifter)
 
-    ds['overall_metric_var'] = np.average(ds.metric_var.values, weights=ds.n_points_metric_var.values/sum(ds.n_points_metric_var.values))
-    ds['overall_metric_geo'] = np.average(ds.metric_geo.values, weights=ds.n_points_metric_geo.values/sum(ds.n_points_metric_geo.values))
+        # clip too high values
+        metric_norma = metric_norma.clip(max=5) 
+
+        angle  = np.angle(U_field / U_drifter)
+        norm_ratio = np.abs(U_field) / np.abs(U_drifter) 
+
+        ds['angle_'+name] = ds.u_filtered.copy(data= angle)
+        ds['norm_ratio_'+name] = ds.u_filtered.copy(data= norm_ratio)
+
+        ds['metric_'+name] = ds.u_filtered.copy(data= metric)
+        ds['metric_norma_'+name] = ds.u_filtered.copy(data= metric_norma)
 
     return ds
 
+
+
+def all_add_metrics(all_scenes):
+
+    DS = all_scenes.copy(deep=True)
+
+    for name in ['geo', 'var']:
+        angle = np.empty(DS.u_geo_swot.values.shape)
+        norm_ratio = np.empty(DS.u_geo_swot.values.shape)
+        metric = np.empty(DS.u_geo_swot.values.shape)
+        metric_norma = np.empty(DS.u_geo_swot.values.shape)
+        n_points_compa = np.empty(DS.sizes['scene'])
+
+        for i in range(DS.sizes['scene']):
+            ds = DS.isel(scene=i)
+
+            n_points_compa[i] = np.nansum(~np.isnan(ds.u_geo_swot.values))
+
+            U_drifter = ds.u_filtered.values + 1j* ds.v_filtered.values
+            U_field = ds['u_'+name+'_swot'].values+1j*ds['v_'+name+'_swot'].values
+
+            metric[i] = np.abs(U_drifter - U_field)
+            
+            metric_norma[i] = np.abs(U_drifter - U_field) / np.abs(U_drifter)
+
+            angle[i]  = np.angle(U_field / U_drifter)
+            norm_ratio[i] = np.abs(U_field) / np.abs(U_drifter) 
+
+        
+        DS['n_points_compa'] = xr.DataArray(data= n_points_compa, dims='scene')
+        
+        DS['angle_'+name] = DS.u_filtered.copy(data= angle)
+        DS['norm_ratio_'+name] = DS.u_filtered.copy(data= norm_ratio)
+
+        DS['metric_'+name] = DS.u_filtered.copy(data= metric)
+        
+        metric_norma[metric_norma > 5] = 5
+        DS['metric_norma_'+name] = DS.u_filtered.copy(data= metric_norma)
+
+    return DS
 
 
 

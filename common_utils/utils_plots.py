@@ -2,29 +2,172 @@
 # --- Imports
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 
-
-import cartopy.geodesic as geod
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from cartopy.geodesic import Geodesic
 
 
 from utils import *
 
-# --- Plot 2D
+
+'''
+
+Plots functions
+###############
+
+plot_histogram()
+
+plot_2d_polar_hist() -> comparison between field and drifter vectors
+  
+welch()              -> PSD plots
+
+plot_scenes()        -> plot one scene with all the data (SSH background, geo/cyclo fields and trajectory)
+
+'''
+
+
+
+
+
+
+# --- Histogram plots
+
+def plot_histogram(data, color='grey', maxline=True, meanline=True):
+    mean = data.mean()
+    std = data.std()
+
+    # Create the histogram
+    counts, bins, patches = plt.hist(data, bins=50, alpha=0.6, color=color, edgecolor='black')
+
+    if maxline:
+        # Find the bin with the maximum count
+        max_count = np.max(counts)
+        max_count_index = np.argmax(counts)
+        max_count_bin_center = (bins[max_count_index] + bins[max_count_index + 1]) / 2
+
+        # Add a line for the maximum bin count
+        plt.axvline(max_count_bin_center, color='r', linestyle='dashed', linewidth=1, label=f'max: {max_count_bin_center:.2f}')
+
+    if meanline:
+        # Add a line for the mean
+        plt.axvline(mean, color='k', linestyle='dashed', linewidth=1, label=f'mean: {mean:.2f}')
+
+    plt.legend()
+
+
+
+def plot_2d_polar_hist(r, theta, rmax=None, vmax=None, add_title=None, plot_1sigma=False):
+    fig, ax = plt.subplots(figsize=(8,8), subplot_kw={'projection': 'polar'})
+
+    if rmax is None:
+        rmax = r.max()
+        
+    # Define bin edges for r and theta
+    res = 50
+    r_bins = np.linspace(0, rmax, res)
+    theta_bins = np.linspace(theta.min(), theta.max(), res)
+
+    # Create 2D histogram using numpy's histogram2d function
+    counts, theta_edges, r_edges = np.histogram2d(theta, r, bins=(theta_bins, r_bins))
+
+    # Plot using pcolormesh
+    if vmax is None:
+        vmax = counts.max()
+    h = ax.pcolormesh(theta_bins, r_bins, counts.T, cmap='plasma', zorder=1, vmax=vmax)
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="2%", pad=-1, axes_class=plt.Axes)
+    cbar = plt.colorbar(h, cax=cax)
+
+    # Add the mean point
+    ax.scatter(theta.mean(), r.mean(), marker='o', s=3, c='red', label='Weighted Mean', zorder=2)
+
+    if plot_1sigma:
+        # Add 1-sigma limit
+        theta_grid, r_grid = np.meshgrid(theta_bins, r_bins)
+
+        gaussian = np.exp(-((theta_grid - theta.mean())**2 / (2 * theta.std()**2) +
+                        (r_grid - r.mean())**2 / (2 * r.std()**2)))
+
+        ax.contour(theta_grid, r_grid, gaussian, levels=[0.6065], colors='green', linestyles='--', linewidths=1, zorder=3, label='1-sigma Contour')
+
+
+    # Customize plot
+    title = '2D Histogram of Field velocity normalized by drifter velocity'
+    if add_title:
+        title += '\n' + add_title 
+
+    ax.set_title(title, fontsize=10)
+    ax.set_theta_zero_location('N')
+
+    ax.set_rmax(rmax)
+    ax.set_rticks(np.arange(0, rmax+1, 1), )  
+    ax.set_rlabel_position(285)
+    ax.grid(True)
+
+    ax.legend(bbox_to_anchor=(1,1), fontsize=5)
+
+
+
+# --- PSD welch plot
+
+def welch(sig_list, name_list, dt, freq_list=[], nfenetre = None, save=None, save_path=None):
+
+    if nfenetre is None:
+        nfenetre = len(sig_list[0]) //3
+
+    fig, ax = plt.subplots()
+
+    results = []
+    for sig, lb in zip(sig_list, name_list):
+        frequencies, psd = scipy.signal.welch(sig, fs=1/dt, nperseg = nfenetre, noverlap=nfenetre//4)
+        ax.semilogy(frequencies, psd, label=lb, zorder=4)
+        results.append((frequencies, psd))
+
+    for hour, label, color in freq_list:
+        ax.axvline(-1/(hour*3600), c=color, ls='--', lw=1.1, label=label)
+        
+    ax.axvline(-1/(19*3600), c='black', ls='--', lw=1.5, label='19h (inertial freq)', zorder=1)
+
+    xlim = 10**(-4)
+    ax.set_xlim(-0.5e-4, 0.4e-4)
+    ax.set_ylim(0.7, 5e4)
+
+    ax.set_title('PSD of the complex velocity (Welch\'s Method)')
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('PSD (V^2/Hz)')
+    ax.grid()
+    ax.legend()
+
+    # Set the x-axis to display in powers of ten
+    formatter = matplotlib.ticker.ScalarFormatter(useMathText=True)
+    formatter.set_powerlimits((-1, 1))
+    ax.xaxis.set_major_formatter(formatter)
+
+    if save and save_path:
+        save_name = 'PSD'+ name_list[1] + '.png'
+        plt.savefig(os.path.join(save_path, save_name), bbox_inches='tight', dpi = 300)
+
+    return results
+
+
+
+
+
+
+# --- Spatial plots : plot_scenes
+
 
 def padd_bbox(bbox, padd):
     mlon, Mlon, mlat, Mlat = bbox
     return tuple([mlon-padd, Mlon+padd, mlat-padd, Mlat+padd])
 
 
-
-
 def plot_scene(scene, bkgd_field, field_vec='both', points_hours: int=12, time_point: int=0, 
                
-               padd=0.06, print_metrics=True, plot: bool=True, save_name=None, save_dir=None):
+               padd=0.06, print_metrics=False, add_title=None, plot: bool=True, save_name=None, save_dir=None):
 
     """
     Plots a drifter trajectory scene with background field data, vectors, and specific time points.
@@ -76,6 +219,7 @@ def plot_scene(scene, bkgd_field, field_vec='both', points_hours: int=12, time_p
     bbox = (np.nanmin(ds.lon_filtered.values), np.nanmax(ds.lon_filtered.values), np.nanmin(ds.lat_filtered.values), np.nanmax(ds.lat_filtered.values) )
 
     padd = 0.06
+
     ax.set_extent(padd_bbox(bbox, padd), crs=crs)
 
 
@@ -142,7 +286,9 @@ def plot_scene(scene, bkgd_field, field_vec='both', points_hours: int=12, time_p
 
     title = 'One 3-day drifter scene'
     if print_metrics:
-        title += '\nMetric: geo={:.2f}, cyclo={:.2f}'.format(ds.metric_geo.values, ds.metric_var.values)
+        title += '\nMetric: geo={:.2f}, cyclo={:.2f}'.format(ds.overall_metric_geo.values, ds.overall_metric_var.values)
+    if add_title:
+        title += add_title
     ax.set_title(title)
     ax.legend(fontsize=8)
 
