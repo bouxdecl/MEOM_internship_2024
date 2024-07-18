@@ -8,11 +8,11 @@ Internship supervisors: Julien le Sommer and Vadim Bertrand
 
 
 **Eulerian Comparison of surface drifter velocities with the SSC reconstructed from the SWOT swath in the Mediterranean Sea**
+---
 
 ![A 3-day drifter/field comparison](save_plots/L3_Scenes/L3_Scenes_GOODBAD_best_filtering/GOOD_norma_scene_13.png)
 
-  ---
-
+---
 - **Dataproducts** used:  
 
 	- Mapped SSH field in the mediterranean sea
