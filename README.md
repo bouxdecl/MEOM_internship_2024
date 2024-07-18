@@ -4,7 +4,7 @@ IGE - MEOM team internship (June-July 2024)
 
 Leo Boux de Casson leo.boux_de_casson@ens-lyon.fr
 
-Internship supervisors: Julien le Sommer and Vadim Bertrand
+Internship supervisors: Julien Le Sommer and Vadim Bertrand
 
 
 **Eulerian Comparison of surface drifter velocities with the SSC reconstructed from the SWOT swath in the Mediterranean Sea**
