@@ -48,7 +48,7 @@ Internship supervisors: Julien Le Sommer and Vadim Bertrand
 	- `L3_eulerian_comparison/` :
 		
 		- 	 `MAIN_save_filtered_field_and_Generate_scenes.py` : file to generate a "scenes dataset" with a given field and drifters filtering. Scenes are 3-days long drifters/field comparison to see what is happening at small scales (~10km)
-		- notebooks to see some GOOD and BAD scenes, based on the metric $\frac{||U_{field} - U_{drifter}||}{||U_{drifter}||}$ and also sea the overall eulerian comparison results in the swath
+		- notebooks to see some GOOD and BAD scenes, based on the metric $\frac{||U_{field} - U_{drifter}||}{||U_{drifter}||}$ and also see the overall eulerian comparison results in the swath
 
     - `save_data/` : 
 	
