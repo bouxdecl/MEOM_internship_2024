@@ -1,4 +1,6 @@
-# MEOM_internship_2024
+
+**Eulerian comparison between lagrangian drifters velocities and sea surface currents reconstructed from the SWOT swath in the Mediterranean Sea**
+---
 
 IGE - MEOM team internship (June-July 2024)
 
@@ -6,9 +8,6 @@ Leo Boux de Casson leo.boux_de_casson@ens-lyon.fr
 
 Internship supervisors: Julien Le Sommer and Vadim Bertrand
 
-
-**Eulerian comparison between lagrangian drifters velocities and sea surface currents reconstructed from the SWOT swath in the Mediterranean Sea**
----
 
 ![A 3-day drifter/field comparison](save_plots/L3_Scenes/L3_Scenes_GOODBAD_best_filtering/GOOD_norma_scene_13.png)
 
